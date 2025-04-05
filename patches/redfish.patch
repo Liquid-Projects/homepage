@@ -1,0 +1,210 @@
+diff --git a/src/widgets/components.js b/src/widgets/components.js
+index 148a626b..85368065 100644
+--- a/src/widgets/components.js
++++ b/src/widgets/components.js
+@@ -142,6 +142,7 @@ const components = {
+   whatsupdocker: dynamic(() => import("./whatsupdocker/component")),
+   xteve: dynamic(() => import("./xteve/component")),
+   zabbix: dynamic(() => import("./zabbix/component")),
++  redfish: dynamic(()=> import("./redfish/component")),
+ };
+ 
+ export default components;
+diff --git a/src/widgets/redfish/component.jsx b/src/widgets/redfish/component.jsx
+new file mode 100644
+index 00000000..51df16cc
+--- /dev/null
++++ b/src/widgets/redfish/component.jsx
+@@ -0,0 +1,29 @@
++import { useTranslation } from "next-i18next";
++import Container from "components/services/widget/container";
++import Block from "components/services/widget/block";
++
++import useWidgetAPI from "utils/proxy/use-widget-api";
++
++export default function Component({ service }) {
++  const { t } = useTranslation();
++  const { widget } = service;
++  const { data, error } = useWidgetAPI(widget);
++
++  if (error) {
++    return <Container service={service} error={error} />;
++  }
++
++  if (!data) {
++    return (
++      <Container service={service}>
++        <Block label="redfish.PowerStatus" />
++      </Container>
++    );
++  }
++
++  return (
++    <Container service={service}>
++      <Block label="Power Status" value={data.PowerStatus} />
++    </Container>
++  );
++}
+\ No newline at end of file
+diff --git a/src/widgets/redfish/proxy.js b/src/widgets/redfish/proxy.js
+new file mode 100644
+index 00000000..e9a8c36d
+--- /dev/null
++++ b/src/widgets/redfish/proxy.js
+@@ -0,0 +1,122 @@
++import cache from "memory-cache";
++
++import { formatApiCall } from "utils/proxy/api-helpers";
++import { httpProxy } from "utils/proxy/http";
++import getServiceWidget from "utils/config/service-helpers";
++import createLogger from "utils/logger";
++
++const proxyName = "redfishProxyHandler";
++const sessionTokenCacheKey = `${proxyName}__sessionToken`;
++const logger = createLogger(proxyName);
++
++
++function extractSIDValue(cookieHeaders) {
++    // Loop through the cookies and find the SID cookie with a value
++    for (let cookie of cookieHeaders) {
++      // Regex to capture the SID name-value pair and ensure we're matching the SID cookie correctly
++      const regex = /SID=([^;]+)(?=;|$)/; // Match SID cookie value
++      const match = cookie.match(regex);
++  
++      if (match) {
++        const value = match[1]; // Extracted value of the SID cookie
++  
++        // Only return the value if it's not empty
++        if (value) {
++          return value;  // Return SID value
++        }
++      }
++    }
++  
++    return '';  // Return an empty string if no SID cookie with a value is found
++  }
++
++// Manually create URL-encoded data
++const createUrlEncodedData = (data) => {
++    return Object.keys(data)
++    .map(key => encodeURIComponent(key) + '=' + encodeURIComponent(data[key]))
++    .join('&');
++};
++
++async function login_redfish(widget, service) {
++  logger.debug("redfish is rejecting the request, logging in.");
++
++  const loginUrl = new URL(`${widget.url}/redfish/v1/SessionService/Sessions/`).toString();
++  const loginBody = JSON.stringify({ UserName: widget.username,  Password: widget.password});
++  const loginParams = {
++    method: "POST",
++    headers: {"Content-Type": "application/json"},
++    body: loginBody,
++  };
++
++  const [status, contentType, data,responseHeaders] = await httpProxy(loginUrl, loginParams);
++
++  try {
++    const token = responseHeaders["x-auth-token"];
++    cache.put(`${sessionTokenCacheKey}.${service}`, token, 30);
++    return { token };
++  } catch (e) {
++    logger.error("Unable to login to redfish API: %s", e);
++  }
++  return { token: false };
++}
++
++async function api_redfish(widget, endpoint, service) {
++  const key = `${sessionTokenCacheKey}.${service}`;
++  const url = new URL(formatApiCall("{url}/redfish/v1/{endpoint}", { endpoint, ...widget }));
++  //logger.info(url);
++  //logger.info(cache.get(key));
++  const headers = {
++    "Content-Type": "application/json",
++    "X-Auth-Token": `${cache.get(key)}`,
++  };
++  const params = { method: "GET", headers };
++
++  let [status, contentType, data, responseHeaders] = await httpProxy(url, params);
++
++  if (status === 401 || status === 403) {
++    logger.debug("redfish API rejected the request, attempting to obtain new access token");
++    const { token } = await login_redfish(widget, service);
++    headers.Authorization = `${token}`;
++
++    // retry request with new token
++    [status, contentType, data, responseHeaders] = await httpProxy(url, params);
++
++    if (status !== 200) {
++      logger.error("HTTP %d logging in to redfish, data: %s", status, data);
++      return { status, contentType, data: null, responseHeaders };
++    }
++  }
++
++  if (status !== 200) {
++    logger.error("HTTP %d getting data from redfish, data: %s", status, data);
++    return { status, contentType, data: null, responseHeaders };
++  }
++
++  return { status, contentType, data: JSON.parse(data.toString()), responseHeaders };
++}
++
++export default async function redfishProxyHandler(req, res) {
++  const { group, service, index } = req.query;
++  if (!group || !service) {
++  logger.debug("Invalid or missing service '%s' or group '%s'", service, group);
++  return res.status(400).json({ error: "Invalid proxy service type" });
++  }
++
++  const widget = await getServiceWidget(group, service, index);
++  if (!widget) {
++  logger.debug("Invalid or missing widget for service '%s' in group '%s'", service, group);
++  return res.status(400).json({ error: "Invalid proxy service type" });
++  }
++
++
++  if (!cache.get(`${sessionTokenCacheKey}.${service}`)) {
++      await login_redfish(widget, service);
++  }
++
++  // Get stats for the main blocks
++  const { data } = await api_redfish(widget, "Systems/Self", service);
++
++  return res.status(200).send({
++  PowerStatus: data["PowerState"]
++  });
++}
+\ No newline at end of file
+diff --git a/src/widgets/redfish/widget.js b/src/widgets/redfish/widget.js
+new file mode 100644
+index 00000000..449930cd
+--- /dev/null
++++ b/src/widgets/redfish/widget.js
+@@ -0,0 +1,7 @@
++import redfishProxyHandler from "./proxy";
++
++const widget = {
++  proxyHandler: redfishProxyHandler,
++};
++
++export default widget;
+diff --git a/src/widgets/widgets.js b/src/widgets/widgets.js
+index 21cff92b..c07c54a3 100644
+--- a/src/widgets/widgets.js
++++ b/src/widgets/widgets.js
+@@ -134,6 +134,7 @@ import xteve from "./xteve/widget";
+ import urbackup from "./urbackup/widget";
+ import romm from "./romm/widget";
+ import zabbix from "./zabbix/widget";
++import redfish from "./redfish/widget";
+ 
+ const widgets = {
+   adguard,
+@@ -275,6 +276,7 @@ const widgets = {
+   whatsupdocker,
+   xteve,
+   zabbix,
++  redfish,
+ };
+ 
+ export default widgets;

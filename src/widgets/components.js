@@ -142,6 +142,7 @@ const components = {
   whatsupdocker: dynamic(() => import("./whatsupdocker/component")),
   xteve: dynamic(() => import("./xteve/component")),
   zabbix: dynamic(() => import("./zabbix/component")),
+  redfish: dynamic(()=> import("./redfish/component")),
 };
 
 export default components;
