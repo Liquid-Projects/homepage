@@ -9,27 +9,6 @@ const proxyName = "redfishProxyHandler";
 const sessionTokenCacheKey = `${proxyName}__sessionToken`;
 const logger = createLogger(proxyName);
 
-
-function extractSIDValue(cookieHeaders) {
-    // Loop through the cookies and find the SID cookie with a value
-    for (let cookie of cookieHeaders) {
-      // Regex to capture the SID name-value pair and ensure we're matching the SID cookie correctly
-      const regex = /SID=([^;]+)(?=;|$)/; // Match SID cookie value
-      const match = cookie.match(regex);
-  
-      if (match) {
-        const value = match[1]; // Extracted value of the SID cookie
-  
-        // Only return the value if it's not empty
-        if (value) {
-          return value;  // Return SID value
-        }
-      }
-    }
-  
-    return '';  // Return an empty string if no SID cookie with a value is found
-  }
-
 // Manually create URL-encoded data
 const createUrlEncodedData = (data) => {
     return Object.keys(data)
