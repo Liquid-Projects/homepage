@@ -1,0 +1,5 @@
+{
+	"name":"redfish",
+	"widget":"redfish/widget",
+	"components":"redfish/component"
+}

@@ -1,3 +1,8 @@
+import plugins from "../plugins/plugins"
+
+plugins();
+
+
 import adguard from "./adguard/widget";
 import apcups from "./apcups/widget";
 import argocd from "./argocd/widget";
@@ -134,7 +139,7 @@ import wgeasy from "./wgeasy/widget";
 import whatsupdocker from "./whatsupdocker/widget";
 import xteve from "./xteve/widget";
 import zabbix from "./zabbix/widget";
-import redfish from "./redfish/widget";
+//import redfish from "../plugins/redfish/widget";
 
 const widgets = {
   adguard,
